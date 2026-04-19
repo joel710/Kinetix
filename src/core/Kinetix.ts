@@ -15,13 +15,24 @@ export class Kinetix {
   private worker: Worker;
   private sab?: SharedArrayBuffer;
   private sharedData: Float32Array;
-  private elements: Map<number, { el: SVGElement; centroid: { x: number; y: number } }> = new Map();
+  private elements: Map<number, { 
+    el: SVGElement; 
+    centroid: { x: number; y: number }; 
+    lastX?: number; 
+    lastY?: number; 
+    lastRot?: number;
+    isVisible?: boolean;
+  }> = new Map();
   private nextId: number = 0;
   private isRunning: boolean = false;
+  private listeners: Map<string, Set<Function>> = new Map();
 
   private useSAB: boolean = false;
   private isWorkerReady: boolean = false;
   private messageQueue: any[] = [];
+  
+  // Viewport tracking for spatial culling
+  private viewport = { x: 0, y: 0, w: 1000, h: 1000 };
 
   constructor(selector: string | Element, options: KinetixOptions = {}) {
     const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
@@ -29,10 +40,12 @@ export class Kinetix {
     this.useSAB = hasSharedArrayBuffer && isCrossOriginIsolated;
 
     const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
-    if (!(el instanceof Element)) {
-      throw new Error(`Kinetix: Container not found`);
-    }
+    if (!(el instanceof Element)) throw new Error(`Kinetix: Container not found`);
     this.container = el;
+    
+    // Initial viewport update
+    this.updateViewport();
+
     this.options = {
       gravity: options.gravity || { x: 0, y: 9.81 },
       friction: options.friction ?? 0.5,
@@ -44,116 +57,105 @@ export class Kinetix {
       this.sab = new SharedArrayBuffer(this.options.maxBodies * 3 * 4);
       this.sharedData = new Float32Array(this.sab);
     } else {
-      if (hasSharedArrayBuffer) {
-        console.warn('Kinetix: SharedArrayBuffer is available, but the page is not cross-origin isolated. Falling back to message-based sync.');
-      } else {
-        console.warn('Kinetix: SharedArrayBuffer not available. Falling back to message-based sync.');
-      }
       this.sharedData = new Float32Array(this.options.maxBodies * 3);
     }
 
-    // Initialize Worker (Vite-compatible syntax)
-    this.worker = new Worker(new URL('../worker/physics.worker.ts', import.meta.url), {
-      type: 'module'
-    });
+    this.worker = new Worker(new URL('../worker/physics.worker.ts', import.meta.url), { type: 'module' });
 
     this.worker.onmessage = (e) => {
-      if (e.data?.type === 'READY') {
-        console.log('Kinetix: Worker signaling READY');
+      const { type, payload } = e.data;
+      if (type === 'READY') {
         this.isWorkerReady = true;
-        this.init(); // Send INIT
+        this.init();
         this.flushQueue();
-      } else if (e.data?.type === 'SYNC') {
-        this.sharedData.set(e.data.payload);
+      } else if (type === 'SYNC') {
+        this.sharedData.set(payload);
+      } else if (type === 'COLLISION') {
+        this.emit('collision', payload);
       }
-    };
-
-    this.worker.onerror = (event) => {
-      console.error('Kinetix: Worker error', event);
     };
 
     this.startRenderLoop();
+    
+    // Update viewport on resize
+    window.addEventListener('resize', () => this.updateViewport());
   }
 
-  private init() {
-    console.log('Kinetix: Sending INIT to worker');
-    this.worker.postMessage({
-      type: 'INIT',
-      payload: {
-        gravity: this.options.gravity,
-        sab: this.useSAB ? this.sab : null,
-        useSAB: this.useSAB,
-        maxBodies: this.options.maxBodies
-      }
-    });
-    this.isRunning = true;
+  private updateViewport() {
+    const rect = this.container.getBoundingClientRect();
+    this.viewport = { x: 0, y: 0, w: rect.width || 1000, h: rect.height || 1000 };
   }
 
-  private flushQueue() {
-    console.log(`Kinetix: Flushing ${this.messageQueue.length} queued messages`);
-    while (this.messageQueue.length > 0) {
-      this.worker.postMessage(this.messageQueue.shift());
-    }
+  public on(event: string, callback: Function) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(callback);
   }
 
-  private postToWorker(message: any) {
-    if (this.isWorkerReady) {
-      this.worker.postMessage(message);
-    } else {
-      this.messageQueue.push(message);
-    }
-  }
-
-  private startRenderLoop() {
-    const loop = () => {
-      if (!this.isRunning) {
-        requestAnimationFrame(loop);
-        return;
-      }
-      this.syncDOM();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
+  private emit(event: string, data: any) {
+    this.listeners.get(event)?.forEach(cb => cb(data));
   }
 
   private syncDOM() {
-    this.elements.forEach(({ el, centroid }, id) => {
+    const threshold = 0.01; // Movement threshold for dirty tracking
+    const margin = 100; // Margin for spatial culling
+    
+    this.elements.forEach((data, id) => {
       const offset = id * 3;
       const x = this.sharedData[offset];
       const y = this.sharedData[offset + 1];
-      const rot = (this.sharedData[offset + 2] * 180) / Math.PI;
+      const rot = this.sharedData[offset + 2];
 
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(rot)) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+      // Spatial Culling: Skip if far outside viewport
+      const isVisible = x > -margin && x < this.viewport.w + margin && 
+                        y > -margin && y < this.viewport.h + margin;
+      
+      if (!isVisible) {
+        if (data.isVisible !== false) {
+          data.el.style.display = 'none';
+          data.isVisible = false;
+        }
+        return;
+      }
+      
+      if (data.isVisible === false) {
+        data.el.style.display = 'block';
+        data.isVisible = true;
+      }
+
+      // Dirty Tracking: Skip if movement is negligible
+      if (data.lastX !== undefined && 
+          Math.abs(x - data.lastX) < threshold && 
+          Math.abs(y - data.lastY) < threshold && 
+          Math.abs(rot - data.lastRot!) < threshold) {
         return;
       }
 
-      const tx = x - centroid.x;
-      const ty = y - centroid.y;
+      const tx = x - data.centroid.x;
+      const ty = y - data.centroid.y;
 
-      // The transform is applied relative to the path's original vertex coordinates.
-      el.setAttribute('transform', `translate(${tx}, ${ty}) rotate(${rot} ${centroid.x} ${centroid.y})`);
+      (data.el as any).style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}rad)`;
+      (data.el as any).style.transformOrigin = `${data.centroid.x}px ${data.centroid.y}px`;
+      
+      data.lastX = x;
+      data.lastY = y;
+      data.lastRot = rot;
     });
   }
 
   public register(selector: string, config: any = {}) {
-    console.log(`Kinetix: Registering elements for selector "${selector}"`);
     const elements = this.container.querySelectorAll(selector);
-    console.log(`Kinetix: Found ${elements.length} elements`);
     elements.forEach(el => {
       if (el instanceof SVGPathElement) {
         this.addBody(el, config);
-      } else {
-        console.warn('Kinetix: Registered element is not an SVGPathElement', el);
       }
     });
   }
 
   private addBody(el: SVGPathElement, config: any) {
     const d = el.getAttribute('d');
-    if (!d) {
-      console.warn('Kinetix: Element has no "d" attribute', el);
-      return;
-    }
+    if (!d) return;
 
     // Parse initial transform to avoid jumping
     let initialX = 0;
@@ -168,13 +170,9 @@ export class Kinetix {
     }
 
     const polygons = Linearizer.linearize(PathParser.parse(d));
-    console.log(`Kinetix: Path linearized into ${polygons.length} polygons`);
     
     for (const vertices of polygons) {
-      if (vertices.length < 3) {
-        console.warn('Kinetix: Polygon has fewer than 3 vertices, skipping');
-        continue;
-      }
+      if (vertices.length < 3) continue;
 
       const id = this.nextId++;
       const centroid = Geometry.calculateCentroid(vertices);
@@ -182,7 +180,6 @@ export class Kinetix {
       // Normalize vertices for Rapier (relative to centroid)
       const flatVertices = vertices.flatMap(v => [v.x - centroid.x, v.y - centroid.y]);
 
-      console.log(`Kinetix: Sending ADD_BODY for id ${id} at (${centroid.x + initialX}, ${centroid.y + initialY})`);
       this.postToWorker({
         type: 'ADD_BODY',
         payload: {
@@ -199,6 +196,9 @@ export class Kinetix {
       });
 
       this.elements.set(id, { el, centroid });
+      
+      // Pre-set some styles for performance
+      el.style.willChange = 'transform';
     }
   }
 

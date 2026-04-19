@@ -2,6 +2,7 @@ import * as RAPIER from '@dimforge/rapier2d';
 
 let world: RAPIER.World;
 let bodies: Map<number, RAPIER.RigidBody> = new Map();
+let eventQueue: RAPIER.EventQueue;
 let sharedBuffer: Float32Array;
 let useSAB: boolean = false;
 
@@ -16,10 +17,8 @@ self.postMessage({ type: 'READY' });
 
 self.onmessage = async (e: MessageEvent) => {
   const { type, payload } = e.data;
-  console.log(`Worker: Received message ${type}`, payload);
 
   if (!initialized && type !== 'INIT') {
-    console.log(`Worker: Queuing message ${type}`);
     messageQueue.push(e.data);
     return;
   }
@@ -27,8 +26,8 @@ self.onmessage = async (e: MessageEvent) => {
   switch (type) {
     case 'INIT':
       try {
-        console.log('Worker: Initializing Rapier...');
-
+        await RAPIER.init();
+        eventQueue = new RAPIER.EventQueue(true);
         world = new RAPIER.World(new RAPIER.Vector2(payload.gravity.x, payload.gravity.y));
         useSAB = payload.useSAB && payload.sab != null;
         sharedBuffer = useSAB && payload.sab
@@ -36,15 +35,10 @@ self.onmessage = async (e: MessageEvent) => {
           : new Float32Array(payload.maxBodies * 3);
         initialized = true;
         
-        console.log(`Worker: Setup complete, useSAB: ${useSAB}`);
-
         // Process queued messages
         while (messageQueue.length > 0) {
-          const queuedData = messageQueue.shift()!;
-          console.log(`Worker: Processing queued message ${queuedData.type}`);
-          await handleMessage(queuedData);
+          await handleMessage(messageQueue.shift());
         }
-        
         tick();
       } catch (err) {
         console.error('Worker: Initialization failed', err);
@@ -77,11 +71,11 @@ async function handleMessage(data: any) {
       if (colliderDesc) {
         colliderDesc.setRestitution(config.restitution ?? 0.5);
         colliderDesc.setFriction(config.friction ?? 0.5);
+        colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
         world.createCollider(colliderDesc, body);
       }
       
       bodies.set(id, body);
-      console.log(`Worker: Added body ${id}, total bodies: ${bodies.size}`);
       break;
 
     case 'APPLY_FORCE':
@@ -96,20 +90,35 @@ async function handleMessage(data: any) {
 function tick() {
   if (!world) return;
   
-  world.step();
+  world.step(eventQueue);
+
+  // Handle collision events
+  eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+    if (started) {
+      let id1 = -1, id2 = -1;
+      // Note: In production, we should use a Map for handle -> id mapping
+      for (const [id, body] of bodies) {
+        if (body.handle === handle1) id1 = id;
+        if (body.handle === handle2) id2 = id;
+        if (id1 !== -1 && id2 !== -1) break;
+      }
+      
+      if (id1 !== -1 && id2 !== -1) {
+        self.postMessage({ type: 'COLLISION', payload: { id1, id2 } });
+      }
+    }
+  });
 
   // Sync state
-  bodies.forEach((body, id) => {
+  for (const [id, body] of bodies) {
+    if (body.isSleeping()) continue;
     const offset = id * 3;
-    if (offset + 2 >= sharedBuffer.length) {
-      return;
-    }
     const pos = body.translation();
     const rot = body.rotation();
     sharedBuffer[offset] = pos.x;
     sharedBuffer[offset + 1] = pos.y;
     sharedBuffer[offset + 2] = rot;
-  });
+  }
 
   if (!useSAB) {
     self.postMessage({ type: 'SYNC', payload: sharedBuffer });

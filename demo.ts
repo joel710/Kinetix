@@ -171,105 +171,129 @@ function spawnComplexStructure() {
   }
 }
 
-// Nuclear blast - extreme forces
+// Particle Pool System
+class ParticlePool {
+  private pool: SVGCircleElement[] = [];
+  private active: SVGCircleElement[] = [];
+  private container: SVGElement;
+
+  constructor(containerSelector: string) {
+    this.container = document.querySelector(containerSelector) as SVGElement;
+  }
+
+  acquire(x: number, y: number, r: string, color: string, className: string): SVGCircleElement {
+    let el = this.pool.pop();
+    if (!el) {
+      el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    }
+    el.setAttribute("cx", x.toString());
+    el.setAttribute("cy", y.toString());
+    el.setAttribute("r", r);
+    el.setAttribute("fill", color);
+    el.setAttribute("class", className);
+    el.style.display = 'block';
+    
+    if (!el.parentNode) {
+      this.container.appendChild(el);
+    }
+    this.active.push(el);
+    return el;
+  }
+
+  release(el: SVGCircleElement) {
+    el.style.display = 'none';
+    const index = this.active.indexOf(el);
+    if (index !== -1) this.active.splice(index, 1);
+    this.pool.push(el);
+  }
+
+  releaseAll(className?: string) {
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const el = this.active[i];
+      if (!className || el.classList.contains(className)) {
+        this.release(el);
+      }
+    }
+  }
+}
+
+const particlePool = new ParticlePool('#world');
+
+// Nuclear blast - optimized to avoid DOM Thrashing
 function nuclearBlast() {
+  const blastX = 500;
+  const blastY = 500;
   const physicsStart = performance.now();
-  let processedBodies = 0;
+  
+  // 1. Batch read positions (One reflow)
+  const elements = document.querySelectorAll('.physic');
+  const bodyData = Array.from(elements).map(el => {
+    const rect = el.getBoundingClientRect();
+    return {
+      id: el.id,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2
+    };
+  });
 
-  document.querySelectorAll('.physic').forEach((el, index) => {
+  // 2. Batch apply forces (No reflows)
+  bodyData.forEach((data, index) => {
     setTimeout(() => {
-      const rect = el.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-
-      // Calculate direction from blast center (400, 300)
-      const dx = centerX - 400;
-      const dy = centerY - 300;
+      const dx = data.centerX - blastX;
+      const dy = data.centerY - blastY;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // Nuclear-level force (inversely proportional to distance)
-      const force = Math.max(1000 / (distance + 50), 10);
+      const force = Math.max(2000 / (distance + 50), 20);
       const angle = Math.atan2(dy, dx);
 
       const forceX = Math.cos(angle) * force * (Math.random() * 0.5 + 0.75);
-      const forceY = Math.sin(angle) * force * (Math.random() * 0.5 + 0.75) - Math.random() * 200; // Add upward component
+      const forceY = Math.sin(angle) * force * (Math.random() * 0.5 + 0.75) - 200;
 
-      world.applyForce(`#${el.id}`, forceX, forceY);
-      processedBodies++;
+      world.applyForce(`#${data.id}`, forceX, forceY);
 
-      // Create explosion particles for visual effect
-      if (processedBodies % 10 === 0) {
-        createExplosionParticles(centerX, centerY, 5);
+      if (index % 10 === 0) {
+        createExplosionParticles(data.centerX, data.centerY, 3);
       }
-    }, index * 5); // Stagger application to avoid overwhelming
+    }, index * 2);
   });
 
-  const physicsTime = performance.now() - physicsStart;
-  totalPhysicsTime += physicsTime;
   physicsFrameCount++;
-  (document.getElementById('physics-time') as HTMLElement).textContent = `${physicsTime.toFixed(2)} ms`;
-  console.log(`Nuclear blast processed ${processedBodies} bodies in ${physicsTime.toFixed(2)}ms`);
-
-  // Play explosion sound
+  totalPhysicsTime += (performance.now() - physicsStart);
   audioEngine.playExplosionSound();
 }
 
-// Trail particle system for fast-moving objects
+// Optimized Trail System using Pool
 const trailParticles: Map<string, { x: number; y: number; life: number }[]> = new Map();
 
 function updateTrailParticles() {
+  particlePool.releaseAll('trail-particle');
+
   trailParticles.forEach((particles, id) => {
-    // Update existing particles
-    particles.forEach((particle, index) => {
-      particle.life--;
-      if (particle.life <= 0) {
-        particles.splice(index, 1);
-      }
-    });
-
-    // Add new particle if object is moving fast
     const el = document.getElementById(id);
-    if (el) {
-      const transform = el.getAttribute('transform');
-      if (transform) {
-        const match = transform.match(/translate\(([^,)]+)[, ]*([^)]+)\)/);
-        if (match) {
-          const x = parseFloat(match[1]);
-          const y = parseFloat(match[2]);
+    if (!el) return;
 
-          // Add trail particle
-          particles.push({ x, y, life: 20 });
+    // Use getAttribute directly or better, get data from Kinetix if available
+    const transform = el.getAttribute('transform');
+    if (transform) {
+      const match = transform.match(/translate\(([^, )]+)[, ]+([^)]+)\)/);
+      if (match) {
+        const x = parseFloat(match[1]);
+        const y = parseFloat(match[2]);
 
-          // Limit trail length
-          if (particles.length > 10) {
-            particles.shift();
-          }
-        }
+        particles.push({ x, y, life: 1.0 });
+        if (particles.length > 8) particles.shift();
       }
     }
 
-    // Render trail particles
-    renderTrailParticles(id, particles);
+    particles.forEach((p, i) => {
+      p.life -= 0.1;
+      if (p.life > 0) {
+        particlePool.acquire(p.x, p.y, "2", `rgba(56, 189, 248, ${p.life})`, `trail-${id} trail-particle`);
+      }
+    });
   });
 
   requestAnimationFrame(updateTrailParticles);
-}
-
-function renderTrailParticles(id: string, particles: { x: number; y: number; life: number }[]) {
-  // Remove existing trail elements
-  document.querySelectorAll(`.trail-${id}`).forEach(el => el.remove());
-
-  particles.forEach((particle, index) => {
-    const trailElement = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    trailElement.setAttribute("cx", particle.x.toString());
-    trailElement.setAttribute("cy", particle.y.toString());
-    trailElement.setAttribute("r", "3");
-    trailElement.setAttribute("fill", `rgba(56, 189, 248, ${particle.life / 20})`);
-    trailElement.setAttribute("class", `trail-${id} trail-particle`);
-    trailElement.style.filter = 'blur(1px)';
-
-    document.querySelector('#world')!.appendChild(trailElement);
-  });
 }
 
 // Enable trails for fast-moving objects
@@ -448,33 +472,18 @@ function stressTest() {
   }, 500);
 }
 
-// Auto-generate collision particles for dramatic effect
-function enableCollisionEffects() {
-  setInterval(() => {
-    document.querySelectorAll('.physic').forEach(el => {
-      if (Math.random() < 0.02) { // 2% chance per frame per object
-        const rect = el.getBoundingClientRect();
-        const x = rect.left + rect.width / 2 + (Math.random() - 0.5) * rect.width;
-        const y = rect.top + rect.height / 2 + (Math.random() - 0.5) * rect.height;
-        createCollisionParticles(x, y, 0.5);
-        audioEngine.playCollisionSound(x, y, 0.3);
-      }
-    });
-  }, 100);
-}
-
-// Event listeners
-document.getElementById('spawn-massive')!.addEventListener('click', () => spawnMassiveShapes(1000));
-document.getElementById('spawn-complex')!.addEventListener('click', spawnComplexStructure);
-document.getElementById('blast-nuclear')!.addEventListener('click', nuclearBlast);
-document.getElementById('clear-all')!.addEventListener('click', clearAll);
-document.getElementById('stress-test')!.addEventListener('click', stressTest);
-
-// Initial setup
-updatePerformanceMetrics();
-updateTrailParticles(); // Enable trail particle system
-enableCollisionEffects(); // Enable collision particle effects
-updateCamera(); // Enable dynamic camera
+// Event listeners for collision
+world.on('collision', (payload: { id1: number, id2: number }) => {
+  // Use the shared data to get collision position
+  const offset1 = payload.id1 * 3;
+  const x = (world as any).sharedData[offset1];
+  const y = (world as any).sharedData[offset1 + 1];
+  
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    createCollisionParticles(x, y, 1.0);
+    audioEngine.playCollisionSound(x, y, 0.5);
+  }
+});
 
 // Auto-spawn some initial shapes
 setTimeout(() => {
