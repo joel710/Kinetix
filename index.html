@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kinetix Frontier - High Performance SVG Physics</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0f172a;
+            color: white;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .stats {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.5rem; color: #38bdf8; }
+        p { margin: 5px 0; font-size: 0.9rem; opacity: 0.8; }
+        
+        svg {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        
+        .physic { fill: #38bdf8; stroke: #0ea5e9; stroke-width: 1; }
+        .obstacle { fill: #1e293b; stroke: #334155; stroke-width: 2; }
+        .logo { fill: #fbbf24; }
+        
+        .btn-container {
+            margin-top: 15px;
+            pointer-events: auto;
+        }
+        button {
+            background: #38bdf8;
+            border: none;
+            color: #0f172a;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stats">
+            <h1>Kinetix Engine</h1>
+            <p>• Multi-threaded (Web Workers)</p>
+            <p>• Zero-copy Sync (SharedArrayBuffer)</p>
+            <p>• Adaptive Bézier Subdivision</p>
+            <div class="btn-container">
+                <button id="spawn">Spawn Shapes</button>
+                <button id="blast">Explosion!</button>
+            </div>
+        </div>
+    </div>
+
+    <svg id="world" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
+        <!-- Static Obstacles -->
+        <path class="obstacle floor" d="M 0 950 L 1000 950 L 1000 1000 L 0 1000 Z" />
+        <path class="obstacle" d="M 200 400 L 400 450 L 400 500 L 200 450 Z" />
+        <path class="obstacle" d="M 800 400 L 600 450 L 600 500 L 800 450 Z" />
+        <path class="obstacle" d="M 450 700 L 550 700 L 550 750 L 450 750 Z" />
+        
+        <!-- Dynamic elements will be injected here -->
+    </svg>
+
+    <script type="module" src="/demo.ts"></script>
+</body>
+</html>

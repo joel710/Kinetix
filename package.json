@@ -1,0 +1,28 @@
+{
+  "name": "kinetix",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Frontier SVG Physics Library",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "vitest",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier2d": "^0.11.2",
+    "dompurify": "^3.0.6"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "tsup": "^7.2.0",
+    "typescript": "^5.2.2",
+    "vite": "^4.5.0",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0",
+    "vitest": "^0.34.6"
+  }
+}
