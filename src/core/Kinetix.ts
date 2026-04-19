@@ -15,7 +15,7 @@ export class Kinetix {
   private worker: Worker;
   private sab?: SharedArrayBuffer;
   private sharedData: Float32Array;
-  private elements: Map<number, SVGElement> = new Map();
+  private elements: Map<number, { el: SVGElement; centroid: { x: number; y: number } }> = new Map();
   private nextId: number = 0;
   private isRunning: boolean = false;
 
@@ -24,8 +24,10 @@ export class Kinetix {
   private messageQueue: any[] = [];
 
   constructor(selector: string | Element, options: KinetixOptions = {}) {
-    this.useSAB = typeof SharedArrayBuffer !== 'undefined';
-    
+    const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+    const isCrossOriginIsolated = typeof navigator !== 'undefined' && (navigator as any).crossOriginIsolated === true;
+    this.useSAB = hasSharedArrayBuffer && isCrossOriginIsolated;
+
     const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
     if (!(el instanceof Element)) {
       throw new Error(`Kinetix: Container not found`);
@@ -42,7 +44,11 @@ export class Kinetix {
       this.sab = new SharedArrayBuffer(this.options.maxBodies * 3 * 4);
       this.sharedData = new Float32Array(this.sab);
     } else {
-      console.warn('Kinetix: SharedArrayBuffer not available. Falling back to message-based sync.');
+      if (hasSharedArrayBuffer) {
+        console.warn('Kinetix: SharedArrayBuffer is available, but the page is not cross-origin isolated. Falling back to message-based sync.');
+      } else {
+        console.warn('Kinetix: SharedArrayBuffer not available. Falling back to message-based sync.');
+      }
       this.sharedData = new Float32Array(this.options.maxBodies * 3);
     }
 
@@ -52,14 +58,18 @@ export class Kinetix {
     });
 
     this.worker.onmessage = (e) => {
-      if (e.data.type === 'READY') {
+      if (e.data?.type === 'READY') {
         console.log('Kinetix: Worker signaling READY');
         this.isWorkerReady = true;
         this.init(); // Send INIT
         this.flushQueue();
-      } else if (e.data.type === 'SYNC') {
+      } else if (e.data?.type === 'SYNC') {
         this.sharedData.set(e.data.payload);
       }
+    };
+
+    this.worker.onerror = (event) => {
+      console.error('Kinetix: Worker error', event);
     };
 
     this.startRenderLoop();
@@ -107,15 +117,21 @@ export class Kinetix {
   }
 
   private syncDOM() {
-    this.elements.forEach((el, id) => {
+    this.elements.forEach(({ el, centroid }, id) => {
       const offset = id * 3;
       const x = this.sharedData[offset];
       const y = this.sharedData[offset + 1];
       const rot = (this.sharedData[offset + 2] * 180) / Math.PI;
 
-      // Using setAttribute('transform') is more reliable for SVG coordinate systems
-      // than CSS transform, though slightly slower. It avoids unit conflicts.
-      el.setAttribute('transform', `translate(${x}, ${y}) rotate(${rot})`);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(rot)) {
+        return;
+      }
+
+      const tx = x - centroid.x;
+      const ty = y - centroid.y;
+
+      // The transform is applied relative to the path's original vertex coordinates.
+      el.setAttribute('transform', `translate(${tx}, ${ty}) rotate(${rot} ${centroid.x} ${centroid.y})`);
     });
   }
 
@@ -182,13 +198,13 @@ export class Kinetix {
         }
       });
 
-      this.elements.set(id, el);
+      this.elements.set(id, { el, centroid });
     }
   }
 
   public applyForce(selector: string, x: number, y: number) {
     const targetEl = this.container.querySelector(selector);
-    this.elements.forEach((el, id) => {
+    this.elements.forEach(({ el }, id) => {
       if (el === targetEl) {
         this.postToWorker({ type: 'APPLY_FORCE', payload: { id, x, y } });
       }

@@ -28,12 +28,12 @@ self.onmessage = async (e: MessageEvent) => {
     case 'INIT':
       try {
         console.log('Worker: Initializing Rapier...');
-        await RAPIER.init();
-        console.log('Worker: Rapier initialized successfully');
-        
+
         world = new RAPIER.World(new RAPIER.Vector2(payload.gravity.x, payload.gravity.y));
-        useSAB = payload.useSAB;
-        sharedBuffer = useSAB ? new Float32Array(payload.sab) : new Float32Array(payload.maxBodies * 3);
+        useSAB = payload.useSAB && payload.sab != null;
+        sharedBuffer = useSAB && payload.sab
+          ? new Float32Array(payload.sab)
+          : new Float32Array(payload.maxBodies * 3);
         initialized = true;
         
         console.log(`Worker: Setup complete, useSAB: ${useSAB}`);
@@ -100,9 +100,12 @@ function tick() {
 
   // Sync state
   bodies.forEach((body, id) => {
+    const offset = id * 3;
+    if (offset + 2 >= sharedBuffer.length) {
+      return;
+    }
     const pos = body.translation();
     const rot = body.rotation();
-    const offset = id * 3;
     sharedBuffer[offset] = pos.x;
     sharedBuffer[offset + 1] = pos.y;
     sharedBuffer[offset + 2] = rot;

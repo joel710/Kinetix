@@ -27,7 +27,18 @@ export class Geometry {
       y += (p1.y + p2.y) * f;
       area += f;
     }
-    area *= 3; // 6 * Area / 2
-    return { x: x / area, y: y / area };
+    const signedArea = area / 2;
+    if (signedArea === 0) {
+      const fallback = vertices.reduce((acc, point) => {
+        acc.x += point.x;
+        acc.y += point.y;
+        return acc;
+      }, { x: 0, y: 0 });
+      return {
+        x: fallback.x / vertices.length,
+        y: fallback.y / vertices.length
+      };
+    }
+    return { x: x / (6 * signedArea), y: y / (6 * signedArea) };
   }
 }
