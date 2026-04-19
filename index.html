@@ -20,14 +20,96 @@
             pointer-events: none;
         }
         .stats {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 15px;
-            border-radius: 8px;
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            border: 2px solid rgba(56, 189, 248, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            min-width: 280px;
         }
-        h1 { margin: 0 0 10px 0; font-size: 1.5rem; color: #38bdf8; }
-        p { margin: 5px 0; font-size: 0.9rem; opacity: 0.8; }
+        h1 { 
+            margin: 0 0 15px 0; 
+            font-size: 1.8rem; 
+            color: #38bdf8; 
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+            background: linear-gradient(45deg, #38bdf8, #06b6d4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .metrics p {
+            margin: 0;
+            font-size: 0.85rem;
+            opacity: 0.9;
+            display: flex;
+            justify-content: space-between;
+        }
+        .metrics strong {
+            color: #f59e0b;
+        }
+        .metrics span {
+            color: #10b981;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .btn-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px;
+            pointer-events: auto;
+        }
+        button {
+            background: linear-gradient(135deg, #38bdf8, #06b6d4);
+            border: none;
+            color: #0f172a;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(56, 189, 248, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(56, 189, 248, 0.4);
+            background: linear-gradient(135deg, #06b6d4, #0891b2);
+        }
+        button:active { 
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(56, 189, 248, 0.3);
+        }
+        button:nth-child(3) {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        button:nth-child(3):hover {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+        }
+        button:nth-child(4) {
+            background: linear-gradient(135deg, #6b7280, #4b5563);
+        }
+        button:nth-child(4):hover {
+            background: linear-gradient(135deg, #4b5563, #374151);
+            box-shadow: 0 4px 16px rgba(107, 114, 128, 0.4);
+        }
+        button:nth-child(5) {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+        button:nth-child(5):hover {
+            background: linear-gradient(135deg, #d97706, #b45309);
+            box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
+        }
         
         svg {
             width: 100vw;
@@ -35,25 +117,41 @@
             display: block;
         }
         
-        .physic { fill: #38bdf8; stroke: #0ea5e9; stroke-width: 1; }
-        .obstacle { fill: #1e293b; stroke: #334155; stroke-width: 2; }
+        .physic { 
+            fill: #38bdf8; 
+            stroke: #0ea5e9; 
+            stroke-width: 1; 
+            filter: drop-shadow(0 2px 4px rgba(56, 189, 248, 0.3));
+        }
+        .obstacle { 
+            fill: #1e293b; 
+            stroke: #334155; 
+            stroke-width: 2; 
+            filter: drop-shadow(0 2px 8px rgba(30, 41, 59, 0.5));
+        }
+        .ground {
+            fill: #374151;
+            stroke: #4b5563;
+            stroke-width: 3;
+        }
+        .obstacle:hover {
+            stroke: #f59e0b;
+            stroke-width: 3;
+        }
+        .explosion-particle {
+            filter: blur(0.5px);
+            pointer-events: none;
+        }
+        .trail-particle {
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+        .collision-particle {
+            filter: blur(0.3px);
+            pointer-events: none;
+            mix-blend-mode: multiply;
+        }
         .logo { fill: #fbbf24; }
-        
-        .btn-container {
-            margin-top: 15px;
-            pointer-events: auto;
-        }
-        button {
-            background: #38bdf8;
-            border: none;
-            color: #0f172a;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.1s;
-        }
-        button:active { transform: scale(0.95); }
     </style>
 </head>
 <body>
@@ -71,11 +169,33 @@
     </div>
 
     <svg id="world" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
-        <!-- Static Obstacles -->
-        <path class="obstacle floor" d="M 0 950 L 1000 950 L 1000 1000 L 0 1000 Z" />
+        <!-- Ultra Complex Static Environment -->
+        
+        <!-- Ground with multiple levels -->
+        <path class="obstacle ground" d="M 0 950 L 1000 950 L 1000 1000 L 0 1000 Z" />
+        <path class="obstacle ground" d="M 0 800 L 300 800 L 300 850 L 0 850 Z" />
+        <path class="obstacle ground" d="M 700 750 L 1000 750 L 1000 800 L 700 800 Z" />
+        
+        <!-- Complex geometric obstacles -->
         <path class="obstacle" d="M 200 400 L 400 450 L 400 500 L 200 450 Z" />
         <path class="obstacle" d="M 800 400 L 600 450 L 600 500 L 800 450 Z" />
         <path class="obstacle" d="M 450 700 L 550 700 L 550 750 L 450 750 Z" />
+        
+        <!-- Advanced obstacle course -->
+        <path class="obstacle" d="M 100 600 L 200 600 L 200 650 L 150 650 L 150 700 L 100 700 Z" />
+        <path class="obstacle" d="M 800 550 L 900 550 L 900 600 L 850 600 L 850 650 L 800 650 Z" />
+        
+        <!-- Circular obstacles -->
+        <circle class="obstacle" cx="300" cy="650" r="30" />
+        <circle class="obstacle" cx="700" cy="600" r="25" />
+        
+        <!-- Complex polygonal obstacles -->
+        <path class="obstacle" d="M 50 300 L 100 280 L 120 320 L 80 340 L 30 330 Z" />
+        <path class="obstacle" d="M 900 250 L 950 230 L 970 270 L 930 290 L 880 280 Z" />
+        
+        <!-- Ramp systems -->
+        <path class="obstacle" d="M 400 600 L 500 550 L 500 570 L 400 620 Z" />
+        <path class="obstacle" d="M 500 500 L 600 450 L 600 470 L 500 520 Z" />
         
         <!-- Dynamic elements will be injected here -->
     </svg>
